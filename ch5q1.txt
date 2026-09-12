@@ -1,0 +1,10 @@
+expr      -> expr trailers
+expr      -> IDENTIFIER
+expr      -> NUMBER
+trailers  -> trailer
+trailers  -> trailer trailers
+trailer   -> "(" ")"
+trailer   -> "(" arguments ")"
+trailer   -> "." IDENTIFIER
+arguments -> expr
+arguments -> expr "," arguments
