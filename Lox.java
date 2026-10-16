@@ -4,7 +4,9 @@ import java.util.List;
 
 // start here. run a file, or type code in one line at a time
 public class Lox {
-  static boolean oops = false;   // true if anything went wrong
+  static final Interpreter terp = new Interpreter();   // one for the whole session, keeps stuff around later
+  static boolean oops = false;      // true if the code was written wrong (scanner/parser)
+  static boolean oopsRun = false;   // true if it broke while running
 
   public static void main(String[] args) throws IOException {
     if (args.length > 1) { System.out.println("Usage: jlox [script]"); System.exit(64); }
@@ -15,6 +17,7 @@ public class Lox {
   static void runFile(String path) throws IOException {
     run(new String(Files.readAllBytes(Paths.get(path))));
     if (oops) System.exit(65);
+    if (oopsRun) System.exit(70);
   }
 
   static void runPrompt() throws IOException {
@@ -33,7 +36,7 @@ public class Lox {
     List<Token> toks = new Scanner(src).scanTokens();
     Expr tree = new Parser(toks).parse();
     if (oops) return;   // something broke, we already said so
-    System.out.println(new AstPrinter().print(tree));
+    terp.interpret(tree);
   }
 
   // scanner errors, we only know the line
@@ -45,6 +48,12 @@ public class Lox {
     else report(tok.line, " at '" + tok.text + "'", msg);
   }
 
+  // runtime errors, say the message then the line
+  static void runtimeError(RuntimeError err) {
+    System.err.println(err.getMessage() + "\n[line " + err.tok.line + "]");
+    oopsRun = true;
+  }
+  
   static void report(int line, String where, String msg) {
     System.err.println("[line " + line + "] Error" + where + ": " + msg);
     oops = true;
