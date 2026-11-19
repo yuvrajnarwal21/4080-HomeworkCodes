@@ -4,13 +4,15 @@ import java.util.List;
 
 // start here. run a file, or type code in one line at a time
 public class Lox {
-  static final Interpreter terp = new Interpreter();   // one for the whole session, keeps stuff around later
-  static boolean oops = false;      // true if the code was written wrong (scanner/parser)
-  static boolean oopsRun = false;   // true if it broke while running
+  static final Interpreter terp = new Interpreter();
+  static boolean oops = false;      // scanner/parser error
+  static boolean oopsRun = false;   // broke while running
 
   public static void main(String[] args) throws IOException {
-    if (args.length > 1) { System.out.println("Usage: jlox [script]"); System.exit(64); }
-    else if (args.length == 1) runFile(args[0]);
+    if (args.length > 1) {
+      System.out.println("Usage: jlox [script]");
+      System.exit(64);
+    } else if (args.length == 1) runFile(args[0]);
     else runPrompt();
   }
 
@@ -31,29 +33,26 @@ public class Lox {
     }
   }
 
-  // code -> tokens -> tree -> print it
+  // code -> tokens -> statements -> run them
   static void run(String src) {
     List<Token> toks = new Scanner(src).scanTokens();
-    Expr tree = new Parser(toks).parse();
-    if (oops) return;   // something broke, we already said so
+    List<Stmt> tree = new Parser(toks).parse();
+    if (oops) return;
     terp.interpret(tree);
   }
 
-  // scanner errors, we only know the line
   static void error(int line, String msg) { report(line, "", msg); }
 
-  // parser errors, we know the exact token
   static void error(Token tok, String msg) {
     if (tok.kind == TokenType.EOF) report(tok.line, " at end", msg);
     else report(tok.line, " at '" + tok.text + "'", msg);
   }
 
-  // runtime errors, say the message then the line
   static void runtimeError(RuntimeError err) {
     System.err.println(err.getMessage() + "\n[line " + err.tok.line + "]");
     oopsRun = true;
   }
-  
+
   static void report(int line, String where, String msg) {
     System.err.println("[line " + line + "] Error" + where + ": " + msg);
     oops = true;
