@@ -1,0 +1,4 @@
+{
+  var unused = 10;
+  unused = 20;
+}

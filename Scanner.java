@@ -53,9 +53,7 @@ class Scanner {
 
       default:
         if (digit(c)) num();
-        else if (alpha(c)) word();
-        else Lox.error(line, "Unexpected character.");
-    }
+        else if (alpha(c)) word();    }
   }
 
   // a word. lox's word or just a name?
@@ -75,7 +73,6 @@ class Scanner {
   // a string, "like this"
   void str() {
     while (peek() != '"' && !done()) { if (peek() == '\n') line++; nom(); }
-    if (done()) { Lox.error(line, "Unterminated string."); return; }
     nom();   // the closing "
     add(TokenType.STRING, src.substring(from + 1, at - 1));   // drop the quotes
   }

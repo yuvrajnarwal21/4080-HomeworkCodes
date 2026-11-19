@@ -1,0 +1,38 @@
+var a = "global";
+
+{
+  fun showA() {
+    print a;
+  }
+
+  showA();
+  var a = "block";
+  print a;
+  showA();
+}
+
+fun counter() {
+  var count = 0;
+  return fun() {
+    count = count + 1;
+    return count;
+  };
+}
+
+var next = counter();
+print next();
+print next();
+
+{
+  var first = 10;
+  var second = 20;
+
+  {
+    var first = 100;
+    second = second + 5;
+    print first;
+  }
+
+  print first;
+  print second;
+}

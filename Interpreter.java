@@ -5,26 +5,44 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   final Environment globals = new Environment();
   Environment env = globals;
 
+  final Map<Expr, int[]> locals = new IdentityHashMap<>();
+  final Map<Token, Integer> slots = new IdentityHashMap<>();
+
+  // save both the scope distance and the slot inside it
+  void resolve(Expr e, int depth, int index) {
+    locals.put(e, new int[] {depth, index});
+  }
+
+  void define(Token name, Object val, Environment scope) {
+    Integer index = slots.get(name);
+    if (index == null) globals.define(name.text, val);
+    else scope.put(index, val);
+  }
+
   Interpreter() {
     globals.define("clock", new LoxCallable() {
       public int arity() { return 0; }
+
       public Object call(Interpreter terp, List<Object> args) {
         return System.currentTimeMillis() / 1000.0;
       }
+
       public String toString() { return "<native fn>"; }
     });
   }
 
   void interpret(List<Stmt> body) {
-    try { for (Stmt s : body) run(s); }
-    catch (RuntimeError err) { Lox.runtimeError(err); }
-    catch (Return answer) {
-      Lox.runtimeError(new RuntimeError(answer.keyword, "Can't return from top-level code."));
+    try {
+      for (Stmt s : body) run(s);
+    } catch (RuntimeError err) {
+      Lox.runtimeError(err);
+    } catch (Return answer) {
+      Lox.runtimeError(new RuntimeError(answer.keyword,
+          "Can't return from top-level code."));
     }
   }
 
   void run(Stmt s) { s.accept(this); }
-  Object eval(Expr e) { return e.accept(this); }
 
   // always put the old scope back, even if a return jumps out
   void runBlock(List<Stmt> body, Environment local) {
@@ -32,7 +50,9 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     try {
       env = local;
       for (Stmt s : body) run(s);
-    } finally { env = old; }
+    } finally {
+      env = old;
+    }
   }
 
   public Void visitBlockStmt(Stmt.Block s) {
@@ -51,7 +71,7 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   }
 
   public Void visitVarStmt(Stmt.Var s) {
-    env.define(s.name.text, s.val == null ? null : eval(s.val));
+    define(s.name, s.val == null ? null : eval(s.val), env);
     return null;
   }
 
@@ -60,7 +80,7 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   }
 
   public Void visitFunctionStmt(Stmt.Function s) {
-    env.define(s.name.text, new LoxFunction(s.name.text, s.fn, env));
+    define(s.name, new LoxFunction(s.name.text, s.fn, env), env);
     return null;
   }
 
@@ -75,14 +95,24 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     return null;
   }
 
-  public Object visitVariableExpr(Expr.Variable e) { return env.get(e.name); }
-  public Object visitFunctionExpr(Expr.Function e) { return new LoxFunction(null, e, env); }
-  public Object visitLiteralExpr(Expr.Literal e)   { return e.val; }
-  public Object visitGroupingExpr(Expr.Grouping e) { return eval(e.inside); }
+  public Object visitVariableExpr(Expr.Variable e) {
+    int[] where = locals.get(e);
+    return where == null
+        ? globals.get(e.name)
+        : env.getAt(where[0], where[1]);
+  }
+
+  public Object visitFunctionExpr(Expr.Function e) {
+    return new LoxFunction(null, e, env);
+  }
 
   public Object visitAssignExpr(Expr.Assign e) {
     Object val = eval(e.val);
-    env.assign(e.name, val);
+    int[] where = locals.get(e);
+
+    if (where == null) globals.assign(e.name, val);
+    else env.assignAt(where[0], where[1], val);
+
     return val;
   }
 
@@ -91,7 +121,9 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     if (e.op.kind == TokenType.OR) {
       if (isTruthy(lhs)) return lhs;
-    } else if (!isTruthy(lhs)) return lhs;
+    } else if (!isTruthy(lhs)) {
+      return lhs;
+    }
 
     return eval(e.rhs);   // only run the right side if we need it
   }
@@ -114,7 +146,17 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     return fn.call(this, args);
   }
 
-  // a ? b : c. only run the side we need
+  Object eval(Expr e) { return e.accept(this); }
+
+  public Object visitLiteralExpr(Expr.Literal e) {
+    return e.val;
+  }
+
+  public Object visitGroupingExpr(Expr.Grouping e) {
+    return eval(e.inside);
+  }
+
+  // a ? b : c, only run the side we need
   public Object visitConditionalExpr(Expr.Conditional e) {
     return isTruthy(eval(e.cond)) ? eval(e.yep) : eval(e.nope);
   }
@@ -123,8 +165,11 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     Object rhs = eval(e.rhs);
 
     switch (e.op.kind) {
-      case BANG:  return !isTruthy(rhs);
-      case MINUS: numCheck(e.op, rhs); return -(double)rhs;
+      case BANG:
+        return !isTruthy(rhs);
+      case MINUS:
+        numCheck(e.op, rhs);
+        return -(double)rhs;
     }
 
     return null;   // can't get here
@@ -134,29 +179,52 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     Object lhs = eval(e.lhs), rhs = eval(e.rhs);   // left first, then right
 
     switch (e.op.kind) {
-      case COMMA: return rhs;   // ran the left already, toss it, keep the right
+      case COMMA:
+        return rhs;   // ran the left already, toss it, keep the right
 
-      case GREATER:       numsCheck(e.op, lhs, rhs); return (double)lhs >  (double)rhs;
-      case GREATER_EQUAL: numsCheck(e.op, lhs, rhs); return (double)lhs >= (double)rhs;
-      case LESS:          numsCheck(e.op, lhs, rhs); return (double)lhs <  (double)rhs;
-      case LESS_EQUAL:    numsCheck(e.op, lhs, rhs); return (double)lhs <= (double)rhs;
-      case BANG_EQUAL:    return !isEqual(lhs, rhs);
-      case EQUAL_EQUAL:   return isEqual(lhs, rhs);
+      case GREATER:
+        numsCheck(e.op, lhs, rhs);
+        return (double)lhs > (double)rhs;
+      case GREATER_EQUAL:
+        numsCheck(e.op, lhs, rhs);
+        return (double)lhs >= (double)rhs;
+      case LESS:
+        numsCheck(e.op, lhs, rhs);
+        return (double)lhs < (double)rhs;
+      case LESS_EQUAL:
+        numsCheck(e.op, lhs, rhs);
+        return (double)lhs <= (double)rhs;
 
-      case MINUS: numsCheck(e.op, lhs, rhs); return (double)lhs - (double)rhs;
-      case STAR:  numsCheck(e.op, lhs, rhs); return (double)lhs * (double)rhs;
+      case BANG_EQUAL:
+        return !isEqual(lhs, rhs);
+      case EQUAL_EQUAL:
+        return isEqual(lhs, rhs);
 
-      // java would quietly give Infinity / NaN. we yell instead
+      case MINUS:
+        numsCheck(e.op, lhs, rhs);
+        return (double)lhs - (double)rhs;
+      case STAR:
+        numsCheck(e.op, lhs, rhs);
+        return (double)lhs * (double)rhs;
+
+      // earlier challenge: don't quietly give Infinity or NaN
       case SLASH:
         numsCheck(e.op, lhs, rhs);
-        if ((double)rhs == 0) throw new RuntimeError(e.op, "Division by zero.");
+        if ((double)rhs == 0) {
+          throw new RuntimeError(e.op, "Division by zero.");
+        }
         return (double)lhs / (double)rhs;
 
       case PLUS:
         // if either side is a string, turn both into strings and glue them
-        if (lhs instanceof String || rhs instanceof String) return stringify(lhs) + stringify(rhs);
-        if (lhs instanceof Double && rhs instanceof Double) return (double)lhs + (double)rhs;
-        throw new RuntimeError(e.op, "Operands must be two numbers or two strings.");
+        if (lhs instanceof String || rhs instanceof String) {
+          return stringify(lhs) + stringify(rhs);
+        }
+        if (lhs instanceof Double && rhs instanceof Double) {
+          return (double)lhs + (double)rhs;
+        }
+        throw new RuntimeError(e.op,
+            "Operands must be two numbers or two strings.");
     }
 
     return null;   // can't get here
@@ -174,7 +242,7 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     return a.equals(b);
   }
 
-  // make sure stuff is a number before we do math on it
+  // make sure stuff is a number before doing math on it
   void numCheck(Token op, Object o) {
     if (o instanceof Double) return;
     throw new RuntimeError(op, "Operand must be a number.");
@@ -189,7 +257,9 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   String stringify(Object o) {
     if (o == null) return "nil";
     String s = o.toString();
-    if (o instanceof Double && s.endsWith(".0")) s = s.substring(0, s.length() - 2);
+    if (o instanceof Double && s.endsWith(".0")) {
+      s = s.substring(0, s.length() - 2);
+    }
     return s;
   }
 }
