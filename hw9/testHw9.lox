@@ -1,0 +1,25 @@
+var breakfast = "beignets";
+var beverage = "cafe au lait";
+breakfast = breakfast + " with " + beverage;
+print breakfast;
+
+var score = 10;
+print score;
+score = score + 5;
+print score;
+print score;
+
+var empty;
+print empty;
+
+var a = 0;
+var b = 0;
+a = b = 7;
+print a;
+print b;
+
+print score > 10 ? "passed" : "failed";
+print "ab" == "a" + "b";
+
+var score = 99;
+print score;
